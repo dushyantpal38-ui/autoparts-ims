@@ -1,0 +1,12 @@
+{
+  "name": "AutoParts IMS",
+  "short_name": "AutoParts IMS",
+  "description": "Warehouse inventory management for automobile parts",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f7",
+  "theme_color": "#1e5fa8",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

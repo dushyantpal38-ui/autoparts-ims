@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Single-page client-rendered app; crawlers see the shell with full metadata.
+Sitemap: https://autoparts-ims.vercel.app/sitemap.xml
