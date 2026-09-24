@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore, statusOf, locationString } from '../useStore';
+import { qrPayload } from '../core';
 import { Button, StatusPill, formatDateTime, formatMoney, toast, ConfirmDialog, usePageMeta } from '../ui';
 import { QrImage } from '../qr';
 import { addStock, removeStock, movePart, deletePart } from '../useStore';
@@ -124,8 +125,9 @@ export function PartDetails({ go, id, action }: { go: (p: string) => void; id: s
           {showQr && (
             <section className="card qr-card">
               <h2 className="card-title">Part QR Code</h2>
-              <QrImage value={part.qrCode} size={180} />
+              <QrImage value={qrPayload(part)} size={180} />
               <p className="qr-meta mono">{part.qrCode}</p>
+              <p className="qr-hint">Scan with any phone camera to open this part directly.</p>
               <p className="qr-hint">Print this label and attach it to the part or bin for scanner lookup.</p>
               <div className="qr-actions">
                 <Button onClick={() => window.print()}>Print Label</Button>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore, createPart, nextQrCode, CATEGORIES, WAREHOUSES, type ProductFields, type InventoryFields } from '../useStore';
 import { Button, Field, toast, usePageMeta } from '../ui';
 import { QrImage } from '../qr';
+import { qrPayload } from '../core';
 import { useCanEdit, StaffEditNote } from '../auth';
 
 const EMPTY_PRODUCT: ProductFields = {
@@ -24,6 +25,7 @@ export function AddPartPage({ go }: { go: (p: string) => void }) {
   const [inv, setInv] = useState<InventoryFields>(EMPTY_INV);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [justSaved, setJustSaved] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   if (!canEdit) {
     return (
@@ -59,26 +61,31 @@ export function AddPartPage({ go }: { go: (p: string) => void }) {
     return Object.keys(e).length === 0;
   };
 
-  const save = (another: boolean) => {
+  const save = async (another: boolean) => {
     if (!validate()) {
       toast('err', 'Please fix the highlighted fields.');
       return;
     }
-    const qr = inv.qrCode.trim() || nextQrCode(product.partNumber.trim());
-    const created = createPart(
-      { ...product, partNumber: product.partNumber.trim().toUpperCase() },
-      { ...inv, rack: inv.rack.trim().toUpperCase(), shelf: inv.shelf.trim().toUpperCase(), bin: inv.bin.trim().toUpperCase(), qrCode: qr },
-      'Manual entry (Add Part form)',
-    );
-    setJustSaved(`${created.partNumber} · ${created.id}`);
-    toast('ok', `${created.partNumber} added to inventory (${created.quantity} units at ${created.warehouse} · ${created.rack} · ${created.shelf} · ${created.bin}).`);
-    if (another) {
-      setProduct({ ...EMPTY_PRODUCT, supplier: product.supplier, category: product.category });
-      setInv({ ...EMPTY_INV, warehouse: inv.warehouse, minimumStock: inv.minimumStock });
-      setErrors({});
-      window.scrollTo(0, 0);
-    } else {
-      go(`/part/${created.id}`);
+    setSaving(true);
+    try {
+      const qr = inv.qrCode.trim() || nextQrCode(product.partNumber.trim());
+      const created = await createPart(
+        { ...product, partNumber: product.partNumber.trim().toUpperCase() },
+        { ...inv, rack: inv.rack.trim().toUpperCase(), shelf: inv.shelf.trim().toUpperCase(), bin: inv.bin.trim().toUpperCase(), qrCode: qr },
+        'Manual entry (Add Part form)',
+      );
+      setJustSaved(`${created.partNumber} · ${created.id}`);
+      toast('ok', `${created.partNumber} added to inventory (${created.quantity} units at ${created.warehouse} · ${created.rack} · ${created.shelf} · ${created.bin}).`);
+      if (another) {
+        setProduct({ ...EMPTY_PRODUCT, supplier: product.supplier, category: product.category });
+        setInv({ ...EMPTY_INV, warehouse: inv.warehouse, minimumStock: inv.minimumStock });
+        setErrors({});
+        window.scrollTo(0, 0);
+      } else {
+        go(`/part/${created.id}`);
+      }
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -100,7 +107,7 @@ export function AddPartPage({ go }: { go: (p: string) => void }) {
         </div>
       )}
 
-      <form className="form-stack" onSubmit={(e) => { e.preventDefault(); save(false); }}>
+      <form className="form-stack" onSubmit={(e) => { e.preventDefault(); void save(false); }}>
         <section className="card">
           <header className="card-head">
             <div>
@@ -210,7 +217,7 @@ export function AddPartPage({ go }: { go: (p: string) => void }) {
             </div>
             {qrPreviewValue && (
               <div className="qr-preview">
-                <QrImage value={qrPreviewValue} size={132} />
+                <QrImage value={qrPayload({ id: 'PREVIEW', qrCode: qrPreviewValue })} size={132} />
                 <span className="mono-sm">{qrPreviewValue}</span>
                 <span className="qr-hint">Preview — printable from the part page after saving</span>
               </div>
@@ -219,9 +226,9 @@ export function AddPartPage({ go }: { go: (p: string) => void }) {
         </section>
 
         <div className="form-actions">
-          <Button type="button" onClick={() => go('/inventory')}>Cancel</Button>
-          <Button type="button" onClick={() => save(true)}>Save & Add Another</Button>
-          <Button type="submit" variant="primary">Save Part</Button>
+          <Button type="button" onClick={() => go('/inventory')} disabled={saving}>Cancel</Button>
+          <Button type="button" onClick={() => void save(true)} disabled={saving}>Save & Add Another</Button>
+          <Button type="submit" variant="primary" disabled={saving}>{saving ? 'Saving…' : 'Save Part'}</Button>
         </div>
       </form>
     </div>

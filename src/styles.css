@@ -1182,3 +1182,34 @@ textarea { resize: vertical; }
   .main { padding: 0; }
   body { background: #fff; }
 }
+
+/* ---------------------------------------------------- live mode additions */
+
+.login-shell {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: var(--bg);
+}
+.login-card { width: 100%; max-width: 380px; padding: 28px; }
+.login-brand { margin-bottom: 20px; }
+.login-card h1 { font-size: 20px; margin: 0 0 4px; }
+.login-sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+.login-card .field { display: block; margin-bottom: 14px; }
+.field-label { display: block; font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px; }
+.login-card input {
+  width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 14px; background: #fff;
+}
+.login-card input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.btn-block { width: 100%; justify-content: center; margin-top: 6px; }
+.login-toggle { display: block; margin: 14px auto 0; text-align: center; }
+
+.conn-indicator {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--muted); padding: 2px 10px 10px;
+}
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.conn-on { background: #16a34a; }
+.conn-error { background: #dc2626; }
+.conn-off { background: #9ca3af; }
+
+.qr-hint { font-size: 11.5px; color: var(--muted); margin: 6px 0 0; }

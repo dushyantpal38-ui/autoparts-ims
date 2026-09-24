@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore, findPartByQr } from '../useStore';
+import { codeFromScanText } from '../core';
 import { Button, toast, usePageMeta } from '../ui';
 import { PartSearchPicker } from '../modals';
 import { QrImage } from '../qr';
@@ -59,7 +60,8 @@ export function ScanPage({ go, prefill }: { go: (p: string) => void; prefill: st
   };
 
   const resolveCode = (raw: string) => {
-    const code = raw.trim();
+    // Deep-link QRs contain a full URL — extract the INV-/QR- token first.
+    const code = codeFromScanText(raw).trim();
     if (!code) { setLookup('invalid'); setLastResolved(code); return; }
     const part = findPartByQr(code);
     if (part) {

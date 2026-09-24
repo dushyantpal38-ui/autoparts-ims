@@ -1,22 +1,114 @@
 import { useSyncExternalStore } from 'react';
 import {
   initStore, subscribe, getState, setState, nextId, nowIso, nextQrCode, statusOf, statusLabel,
-  locationString, type Part, type Activity, type ActivityAction, type Role,
-  type StockStatus, type SessionUser,
-  WAREHOUSES, CATEGORIES, STOCK_REASONS_IN, STOCK_REASONS_OUT,
+  locationString, WAREHOUSES, CATEGORIES, STOCK_REASONS_IN, STOCK_REASONS_OUT,
+  type Part, type Activity, type ActivityAction, type Role,
+  type StockStatus, type SessionUser, type AppState,
 } from './core';
 import { SEED_PARTS, SEED_ACTIVITY } from './seedData';
+import {
+  isSupabaseConfigured, fetchAll, pushActivityRemote, upsertPartRemote, patchPartRemote,
+  deletePartRemote, allocatePartId, subscribeRealtime, getSessionUser,
+} from './backend';
 
-// Initialise once at module load.
+// Initialise the local store once at module load (demo data).
 initStore({ parts: SEED_PARTS, activity: SEED_ACTIVITY });
 
-export function useStore() {
+export const LIVE_MODE = isSupabaseConfigured();
+
+// ---------------------------------------------------------------------------
+// Boot: when Supabase is configured, gate on auth, then pull server data and
+// subscribe to realtime changes. Demo mode skips all of this.
+// ---------------------------------------------------------------------------
+
+async function bootRemote(): Promise<void> {
+  setState((s) => ({ ...s, auth: 'connecting' }));
+  const user = await getSessionUser();
+  if (!user) {
+    setState((s) => ({ ...s, auth: 'out', remote: 'on', parts: [], activity: [] }));
+    return;
+  }
+  setState((s) => ({ ...s, user, auth: 'in', remote: 'on' }));
+  await refreshFromServer();
+  subscribeRealtime({
+    onPartChange: (part, removed) => {
+      setState((s) => ({
+        ...s,
+        parts: removed
+          ? s.parts.filter((p) => p.id !== part?.id)
+          : s.parts.some((p) => p.id === part!.id)
+            ? s.parts.map((p) => (p.id === part!.id ? part! : p))
+            : [part!, ...s.parts],
+      }));
+    },
+    onActivity: (a) => {
+      // Skip echoes of entries we already added optimistically.
+      if (getState().activity.some((x) => x.timestamp === a.timestamp && x.action === a.action && x.partId === a.partId)) return;
+      setState((s) => ({ ...s, activity: [a, ...s.activity] }));
+    },
+  });
+}
+
+/** Re-pull parts + activity from the server (used at login and after sign-in). */
+export async function refreshFromServer(): Promise<void> {
+  try {
+    const data = await fetchAll();
+    if (data) {
+      setState((s) => ({
+        ...s,
+        parts: data.parts,
+        activity: data.activity,
+        seq: deriveSeq(data.parts),
+      }));
+    }
+  } catch (e) {
+    console.error('Failed to load inventory from server:', e);
+    setState((s) => ({ ...s, remote: 'error' }));
+  }
+}
+
+function deriveSeq(parts: Part[]): number {
+  let max = 10000;
+  for (const p of parts) {
+    const m = p.id.match(/(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return max;
+}
+
+if (LIVE_MODE) {
+  void bootRemote();
+  // Handle sign-in completing in another tab or after email confirmation.
+  import('./backend').then(({ onAuthChange }) =>
+    onAuthChange(async (user) => {
+      if (user) {
+        setState((s) => ({ ...s, user, auth: 'in', remote: 'on' }));
+        await refreshFromServer();
+      } else {
+        setState((s) => ({ ...s, auth: 'out', parts: [], activity: [] }));
+      }
+    }),
+  );
+}
+
+// ---------------------------------------------------------------- store API --
+
+export function useStore(): AppState {
   return useSyncExternalStore(subscribe, getState, getState);
 }
 
 // ---------------------------------------------------------------- operations
 
-function pushActivity(a: Omit<Activity, 'id' | 'user' | 'role' | 'timestamp'>) {
+interface ActivityInput {
+  partId: string; partNumber: string; partName: string;
+  action: ActivityAction;
+  delta?: number; prevQty?: number; newQty?: number;
+  prevLocation?: string; newLocation?: string;
+  summary?: string;
+  reason: string; note?: string;
+}
+
+function recordActivity(a: ActivityInput) {
   const u = getState().user;
   const entry: Activity = {
     id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -26,6 +118,13 @@ function pushActivity(a: Omit<Activity, 'id' | 'user' | 'role' | 'timestamp'>) {
     ...a,
   };
   setState((s) => ({ ...s, activity: [entry, ...s.activity] }));
+  if (LIVE_MODE) void pushActivityRemote({
+    partId: entry.partId, partNumber: entry.partNumber, partName: entry.partName,
+    action: entry.action, delta: entry.delta, prevQty: entry.prevQty, newQty: entry.newQty,
+    prevLocation: entry.prevLocation, newLocation: entry.newLocation, summary: entry.summary,
+    user: entry.user, role: entry.role, reason: entry.reason, note: entry.note,
+    timestamp: entry.timestamp,
+  });
 }
 
 function touchPart(id: string, patch: Partial<Part>) {
@@ -33,6 +132,7 @@ function touchPart(id: string, patch: Partial<Part>) {
     ...s,
     parts: s.parts.map((p) => (p.id === id ? { ...p, ...patch, lastUpdated: nowIso() } : p)),
   }));
+  if (LIVE_MODE) void patchPartRemote(id, { ...patch, lastUpdated: nowIso() });
 }
 
 export function addStock(partId: string, qty: number, reason: string, note: string) {
@@ -40,7 +140,7 @@ export function addStock(partId: string, qty: number, reason: string, note: stri
   if (!p || qty <= 0) return;
   const newQty = p.quantity + qty;
   touchPart(partId, { quantity: newQty });
-  pushActivity({
+  recordActivity({
     partId, partNumber: p.partNumber, partName: p.partName,
     action: 'stock_in', delta: qty, prevQty: p.quantity, newQty,
     reason, note: note || undefined,
@@ -52,7 +152,7 @@ export function removeStock(partId: string, qty: number, reason: string, note: s
   if (!p || qty <= 0 || qty > p.quantity) return;
   const newQty = p.quantity - qty;
   touchPart(partId, { quantity: newQty });
-  pushActivity({
+  recordActivity({
     partId, partNumber: p.partNumber, partName: p.partName,
     action: 'stock_out', delta: -qty, prevQty: p.quantity, newQty,
     reason, note: note || undefined,
@@ -63,7 +163,7 @@ export function setQuantity(partId: string, newQty: number, reason: string, note
   const p = getState().parts.find((x) => x.id === partId);
   if (!p || newQty < 0 || newQty === p.quantity) return;
   touchPart(partId, { quantity: newQty });
-  pushActivity({
+  recordActivity({
     partId, partNumber: p.partNumber, partName: p.partName,
     action: 'adjustment', delta: newQty - p.quantity, prevQty: p.quantity, newQty,
     reason, note: note || undefined,
@@ -93,7 +193,7 @@ export function updateProduct(partId: string, f: ProductFields) {
   if (p.vehicleModel !== f.vehicleModel) changes.push(`Vehicle → ${f.vehicleModel}`);
   if (p.supplier !== f.supplier) changes.push(`Supplier → ${f.supplier}`);
   if (p.unitCost !== f.unitCost) changes.push(`Unit cost ₹${p.unitCost} → ₹${f.unitCost}`);
-  pushActivity({
+  recordActivity({
     partId, partNumber: f.partNumber, partName: f.partName, action: 'part_updated',
     summary: changes.length ? changes.join('; ') : 'Product details saved (no changes)',
     reason: 'Part record edited',
@@ -111,14 +211,14 @@ export function updateInventory(partId: string, f: InventoryFields) {
   touchPart(partId, next);
   const newLoc = locationString({ ...p, ...next } as Part);
   if (prevLoc !== newLoc) {
-    pushActivity({
+    recordActivity({
       partId, partNumber: p.partNumber, partName: p.partName,
       action: 'location_change', prevLocation: prevLoc, newLocation: newLoc,
       reason: 'Storage location edited via part record',
     });
   }
   if (p.minimumStock !== f.minimumStock) {
-    pushActivity({
+    recordActivity({
       partId, partNumber: p.partNumber, partName: p.partName,
       action: 'min_stock_changed',
       summary: `Minimum stock changed ${p.minimumStock} → ${f.minimumStock}`,
@@ -126,7 +226,7 @@ export function updateInventory(partId: string, f: InventoryFields) {
     });
   }
   if (p.quantity !== f.quantity) {
-    pushActivity({
+    recordActivity({
       partId, partNumber: p.partNumber, partName: p.partName,
       action: 'adjustment', delta: f.quantity - p.quantity, prevQty: p.quantity, newQty: f.quantity,
       reason: 'Quantity edited via part record',
@@ -140,15 +240,19 @@ export function movePart(partId: string, dest: { warehouse: string; rack: string
   const prevLoc = locationString(p);
   touchPart(partId, dest);
   const newLoc = locationString({ ...p, ...dest } as Part);
-  pushActivity({
+  recordActivity({
     partId, partNumber: p.partNumber, partName: p.partName,
     action: 'location_change', prevLocation: prevLoc, newLocation: newLoc,
     reason: reason || 'Manual move', note: note || undefined,
   });
 }
 
-export function createPart(product: ProductFields, inv: InventoryFields, initialReason: string): Part {
-  const id = nextId();
+/**
+ * Create a part locally and (in live mode) on the server. The server allocates
+ * the canonical INV id from a Postgres sequence; demo mode uses the local counter.
+ */
+export async function createPart(product: ProductFields, inv: InventoryFields, initialReason: string): Promise<Part> {
+  const id = LIVE_MODE ? (await allocatePartId()) ?? nextId() : nextId();
   const qr = inv.qrCode || `QR-${Date.now().toString().slice(-5)}`;
   const part: Part = {
     id, qrCode: qr,
@@ -163,7 +267,8 @@ export function createPart(product: ProductFields, inv: InventoryFields, initial
     notes: product.notes,
   };
   setState((s) => ({ ...s, parts: [part, ...s.parts] }));
-  pushActivity({
+  if (LIVE_MODE) void upsertPartRemote(part);
+  recordActivity({
     partId: id, partNumber: part.partNumber, partName: part.partName,
     action: 'part_created',
     summary: `New part added — initial stock ${inv.quantity}`,
@@ -176,7 +281,8 @@ export function deletePart(partId: string, reason: string) {
   const p = getState().parts.find((x) => x.id === partId);
   if (!p) return;
   setState((s) => ({ ...s, parts: s.parts.filter((x) => x.id !== partId) }));
-  pushActivity({
+  if (LIVE_MODE) void deletePartRemote(partId);
+  recordActivity({
     partId, partNumber: p.partNumber, partName: p.partName,
     action: 'part_deleted',
     summary: `Part deleted (was ${p.quantity} units at ${locationString(p)})`,
@@ -193,6 +299,7 @@ export function findPartByQr(qr: string): Part | undefined {
   );
 }
 
+/** Demo-mode only role switcher. Ignored in live mode. */
 export function setUser(u: SessionUser) {
   setState((s) => ({ ...s, user: u }));
 }

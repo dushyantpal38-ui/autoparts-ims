@@ -112,11 +112,18 @@ export function locationString(p: Pick<Part, 'warehouse' | 'rack' | 'shelf' | 'b
 
 const LS_KEY = 'autoparts-ims-v1';
 
+export type AuthStatus = 'connecting' | 'in' | 'out';
+export type RemoteStatus = 'off' | 'on' | 'error';
+
 export interface AppState {
   parts: Part[];
   activity: Activity[];
   user: SessionUser;
   seq: number;
+  /** Supabase auth state. Demo mode is always 'in'. */
+  auth: AuthStatus;
+  /** Live backend link state. Demo mode is 'off'. */
+  remote: RemoteStatus;
 }
 
 function defaultUser(): SessionUser {
@@ -127,19 +134,33 @@ function defaultUser(): SessionUser {
   return { name: 'R. Sharma', role: 'admin' };
 }
 
+export function defaultAppState(seed: { parts: Part[]; activity: Activity[] }): AppState {
+  return {
+    parts: seed.parts, activity: seed.activity,
+    user: defaultUser(), seq: deriveSeq(seed.parts),
+    auth: 'in', remote: 'off',
+  };
+}
+
 function loadState(seed: { parts: Part[]; activity: Activity[] }): AppState {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as AppState;
+      const parsed = JSON.parse(raw) as Partial<AppState>;
       if (Array.isArray(parsed.parts)) {
         // Keep the id counter ahead of any stored/seeded id (e.g. INV-10038).
         const seq = Math.max(parsed.seq ?? 0, deriveSeq(parsed.parts));
-        return { ...parsed, seq, user: parsed.user ?? defaultUser() };
+        return {
+          parts: parsed.parts,
+          activity: parsed.activity ?? [],
+          user: parsed.user ?? defaultUser(),
+          seq,
+          auth: 'in', remote: 'off',
+        };
       }
     }
   } catch { /* corrupted -> reseed */ }
-  return { parts: seed.parts, activity: seed.activity, user: defaultUser(), seq: deriveSeq(seed.parts) };
+  return defaultAppState(seed);
 }
 
 // Largest numeric suffix among part ids; guarantees nextId() never collides.
@@ -183,7 +204,30 @@ export function subscribe(fn: () => void): () => void {
 }
 
 export function resetToSeed(seed: { parts: Part[]; activity: Activity[] }) {
-  setState(() => ({ parts: seed.parts, activity: seed.activity, user: getState().user, seq: deriveSeq(seed.parts) }));
+  setState((s) => ({ ...s, parts: seed.parts, activity: seed.activity, seq: deriveSeq(seed.parts) }));
+}
+
+// ---- QR payload ------------------------------------------------------------
+
+/**
+ * What a printed QR label encodes. A full deep link lets ANY phone camera
+ * app open the part page directly, not just this app's scanner. In file://
+ * or unknown contexts fall back to the short label code.
+ */
+export function qrPayload(p: Pick<Part, 'id' | 'qrCode'>): string {
+  try {
+    if (location.protocol.startsWith('http')) {
+      return `${location.origin}${location.pathname}#/part/${p.id}`;
+    }
+  } catch { /* non-browser context */ }
+  return p.qrCode || p.id;
+}
+
+/** Extract an INV-/QR-/part-number-ish token from arbitrary scanned text. */
+export function codeFromScanText(text: string): string {
+  const m = text.match(/\b(?:INV|QR)-[A-Z0-9-]+\b/i);
+  if (m) return m[0].toUpperCase();
+  return text.trim();
 }
 
 // ---- id helpers -----------------------------------------------------------

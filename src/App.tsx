@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useStore, statusOf } from './useStore';
-import { RoleBanner, useCanEdit, StaffEditNote } from './auth';
-import { Toaster, ConfirmDialog, toast, usePageMeta, useDismiss } from './ui';
+import { useStore, statusOf, LIVE_MODE } from './useStore';
+import { RoleBanner, useCanEdit, StaffEditNote, LoginScreen } from './auth';
+import { Toaster, ConfirmDialog, toast, usePageMeta } from './ui';
 import { resetToSeed } from './core';
 import { SEED_PARTS, SEED_ACTIVITY } from './seedData';
 import { Dashboard } from './pages/Dashboard';
@@ -30,9 +30,22 @@ export function App() {
   const { base, id, query } = parsePath(path);
   const [confirmReset, setConfirmReset] = useState(false);
   const canEdit = useCanEdit();
-  const resetBtnRef = useDismiss<HTMLButtonElement>(false, () => {});
 
+  const { auth, remote } = useStore();
   const lowCount = parts.filter((p) => statusOf(p) === 'low_stock').length;
+
+  // Live mode: gate the whole app behind Supabase auth.
+  if (LIVE_MODE && auth === 'out') return <LoginScreen />;
+  if (LIVE_MODE && auth === 'connecting') {
+    return (
+      <div className="login-shell">
+        <div className="login-card card" style={{ textAlign: 'center' }}>
+          <div className="scan-spinner" aria-label="Connecting" />
+          <p>Connecting to inventory server…</p>
+        </div>
+      </div>
+    );
+  }
 
   let page: JSX.Element;
   switch (base) {
@@ -116,11 +129,20 @@ export function App() {
         </nav>
 
         <div className="sidebar-foot">
+          {LIVE_MODE && (
+            <div className="conn-indicator" title={remote === 'on' ? 'Live — synced with all devices' : 'Connection problem'}>
+              <span className={`conn-dot conn-${remote}`} aria-hidden />
+              {remote === 'on' ? 'Live · synced' : remote === 'error' ? 'Offline / error' : 'Connecting…'}
+            </div>
+          )}
           <RoleBanner />
         </div>
       </aside>
 
       <main className="main">
+        {remote === 'error' && (
+          <div className="banner banner-danger">Live connection error — showing cached data. Check your network and sign in again.</div>
+        )}
         {!canEdit && <StaffEditNote />}
         {page}
       </main>
@@ -141,9 +163,11 @@ export function App() {
           onCancel={() => setConfirmReset(false)}
         />
       )}
-      <button ref={resetBtnRef} className="reset-demo" onClick={() => setConfirmReset(true)} title="Restore sample data">
-        Reset demo data
-      </button>
+      {!LIVE_MODE && (
+        <button className="reset-demo" onClick={() => setConfirmReset(true)} title="Restore sample data">
+          Reset demo data
+        </button>
+      )}
     </div>
   );
 }
