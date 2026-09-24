@@ -1,8 +1,6 @@
 import { useStore, statusOf, locationString } from '../useStore';
-import { Button, StatusPill, formatDateTime, formatMoney, usePageMeta } from '../ui';
-import { CATEGORIES } from '../core';
+import { Button, StatusPill, formatDateTime, usePageMeta } from '../ui';
 import { historyLine } from './PartDetails';
-import type { Activity } from '../core';
 
 export function Dashboard({ go }: { go: (path: string) => void }) {
   usePageMeta(
@@ -15,12 +13,6 @@ export function Dashboard({ go }: { go: (path: string) => void }) {
   const totalUnits = parts.reduce((a, p) => a + p.quantity, 0);
   const low = parts.filter((p) => statusOf(p) === 'low_stock');
   const out = parts.filter((p) => statusOf(p) === 'out_of_stock');
-  const recent = [...parts].sort((a, b) => b.dateAdded.localeCompare(a.dateAdded)).slice(0, 5);
-  const invValue = parts.reduce((a, p) => a + p.quantity * p.unitCost, 0);
-
-  const catCounts = new Map<string, number>();
-  for (const p of parts) catCounts.set(p.category, (catCounts.get(p.category) ?? 0) + 1);
-  const topCats = [...catCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
 
   return (
     <div className="page">
@@ -36,7 +28,6 @@ export function Dashboard({ go }: { go: (path: string) => void }) {
         </div>
       </header>
 
-      {/* KPI row */}
       <div className="stat-row">
         <div className="stat">
           <span className="stat-label">Total Parts</span>
@@ -56,14 +47,9 @@ export function Dashboard({ go }: { go: (path: string) => void }) {
           <span className="stat-value">{out.length}</span>
           <button className="stat-link" onClick={() => go('/inventory?status=out_of_stock')}>View →</button>
         </div>
-        <div className="stat">
-          <span className="stat-label">Inventory Value</span>
-          <span className="stat-value stat-value-sm">{formatMoney(invValue)}</span>
-        </div>
       </div>
 
       <div className="dash-grid">
-        {/* Attention list */}
         <section className="card">
           <header className="card-head">
             <div>
@@ -99,7 +85,6 @@ export function Dashboard({ go }: { go: (path: string) => void }) {
           )}
         </section>
 
-        {/* Recent activity */}
         <section className="card">
           <header className="card-head">
             <div>
@@ -118,56 +103,6 @@ export function Dashboard({ go }: { go: (path: string) => void }) {
                   </span>
                   <span className="act-meta">{a.user} · {formatDateTime(a.timestamp)}</span>
                 </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {/* Recently added */}
-        <section className="card">
-          <header className="card-head">
-            <div>
-              <h2 className="card-title">Recently Added Parts</h2>
-              <p className="card-desc">Latest SKUs onboarded</p>
-            </div>
-            <Button onClick={() => go('/add')}>+ Add Part</Button>
-          </header>
-          <table className="table">
-            <thead>
-              <tr><th>Part</th><th>Category</th><th>Location</th><th className="num">Qty</th><th>Added</th></tr>
-            </thead>
-            <tbody>
-              {recent.map((p) => (
-                <tr key={p.id} className="row-link" onClick={() => go(`/part/${p.id}`)}>
-                  <td>
-                    <span className="mono">{p.partNumber}</span>
-                    <span className="table-sub">{p.partName}</span>
-                  </td>
-                  <td>{p.category}</td>
-                  <td className="muted">{locationString(p)}</td>
-                  <td className="num">{p.quantity}</td>
-                  <td className="muted">{formatDateTime(p.dateAdded)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        {/* Category breakdown */}
-        <section className="card">
-          <header className="card-head">
-            <div>
-              <h2 className="card-title">Stock by Category</h2>
-              <p className="card-desc">Parts count per category</p>
-            </div>
-          </header>
-          <ul className="cat-list">
-            {topCats.map(([cat, count]) => (
-              <li key={cat}>
-                <button onClick={() => go(`/inventory?category=${encodeURIComponent(cat)}`)}>
-                  <span>{cat}</span>
-                  <span className="cat-count">{count}</span>
-                </button>
               </li>
             ))}
           </ul>
